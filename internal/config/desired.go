@@ -61,7 +61,7 @@ func newDesired(l Layer) (*Desired, error) {
 	if err = dec.Decode(rs); err != nil {
 		return nil, fmt.Errorf("ruleset: %w", err)
 	}
-	rs.setDefaults()
+	rs.SetDefaults()
 	if err = rs.validate(); err != nil {
 		return nil, fmt.Errorf("ruleset: %w", err)
 	}
@@ -69,7 +69,8 @@ func newDesired(l Layer) (*Desired, error) {
 	return d, nil
 }
 
-func (r *Ruleset) setDefaults() {
+// SetDefaults fills in the defaults of fields that are not set.
+func (r *Ruleset) SetDefaults() {
 	if r.Name == "" {
 		r.Name = "main"
 	}
