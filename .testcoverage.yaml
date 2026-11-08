@@ -1,0 +1,15 @@
+# Coverage thresholds, checked by vladopajic/go-test-coverage in CI (see ci-run-on-pr.yaml)
+profile: cover.out
+
+threshold:
+  # Minimum coverage percentage required for individual files
+  file: 70
+  # Minimum coverage percentage required for each package
+  package: 80
+  # Minimum overall project coverage percentage required
+  total: 80
+
+exclude:
+  paths:
+    # The command line is a thin layer over the internal packages
+    - ^cmd
