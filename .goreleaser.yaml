@@ -1,0 +1,43 @@
+# Make sure to check the documentation at https://goreleaser.com
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ghsettings
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/ghsettings
+    binary: ghsettings
+    ldflags:
+      - -s -w -X "main.version={{.Version}}"
+
+archives:
+  - formats: [tar.gz]
+    # this name template makes the OS and Arch compatible with the results of `uname`.
+    name_template: ghsettings_v{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+# Please see https://github.com/CycloneDX/cyclonedx-gomod?tab=readme-ov-file#goreleaser-
+sboms:
+  - artifacts: binary
+    documents:
+      - '{{ .Binary }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}.sbom.json'
+    cmd: cyclonedx-gomod
+    args: ['mod', '-licenses', '-assert-licenses', '-std', '-output', '$document', '../']

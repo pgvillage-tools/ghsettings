@@ -1,0 +1,110 @@
+name: CI run on PR
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# A new push to a PR cancels the run of the previous push
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# Everything runs on every event (also in the merge queue), so no job depends on data that only pull requests have.
+jobs:
+  check-go:
+    name: Ensure Go modules synchronicity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.0.0
+      - name: Setup Golang
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check for tidiness of go.mod and go.sum
+        run: |
+          go mod tidy
+          git diff --exit-code -- .
+
+  lint-go:
+    name: Lint Go code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.0.0
+      - name: Setup Golang
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          # Built with go install (from the Go module proxy) instead of downloaded from GitHub releases
+          version: v2.15.0
+          install-mode: goinstall
+          args: --verbose --timeout=10m
+
+  unit-test:
+    name: Run unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.0.0
+      - name: Setup Golang
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: make test
+      - name: Check test coverage
+        uses: vladopajic/go-test-coverage@6890500b00a7e5862e54662c04ea9fa7c799ce1e # v2.23.0
+        with:
+          config: .testcoverage.yaml
+          profile: cover.out
+
+  license-header-test:
+    name: License header test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.0.0
+      - name: Test
+        run: |
+          missing=$(git ls-files '*.go' | while read -r file; do
+            head -n3 "${file}" | grep -q 'SPDX-License-Identifier: GPL-3.0-or-later' || echo "  ${file}"
+          done)
+          if [ -n "${missing}" ]; then
+            echo "Files without license header:"
+            echo "${missing}"
+            exit 1
+          fi
+          echo Success
+
+  # The only required check of this workflow, so the ruleset doesn't change when jobs are added. It must always run,
+  # and only passes when every job it needs succeeded (a skipped required check would count as a pass).
+  ci-result:
+    name: CI result
+    runs-on: ubuntu-latest
+    needs:
+      - check-go
+      - lint-go
+      - unit-test
+      - license-header-test
+    if: always()
+    steps:
+      - name: Evaluate the results
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "Results: ${RESULTS}"
+          if [ "$(echo "${RESULTS}" | jq -r 'all(. == "success")')" != true ]; then
+            echo "::error::All CI jobs must succeed"
+            exit 1
+          fi

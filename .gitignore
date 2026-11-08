@@ -1,0 +1,9 @@
+# Editors
+*~
+.idea/
+.vscode/
+
+# Build and test output
+bin/
+dist/
+cover.out
