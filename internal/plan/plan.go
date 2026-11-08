@@ -168,15 +168,16 @@ func pick(current, keys map[string]any) map[string]any {
 }
 
 // decideChecks returns the required checks that a workflow provides, and whether the merge queue can be enabled:
-// only on a public repository where every workflow that provides a required check has a merge_group trigger.
-// Without it, queued pull requests would wait for checks that never come.
+// only on a public repository where every configured check is provided by a workflow with a merge_group trigger.
+// Without it, queued pull requests would wait for checks that never come, or merge without the checks.
 func decideChecks(rs *config.Ruleset, wfs workflows.Set, public bool) (checks []string, mergeQueue bool,
 	warnings []string) {
-	var noMergeGroup []string
+	var noMergeGroup, missing []string
 	for _, check := range rs.RequiredChecks {
 		wf := wfs.Find(check)
 		if wf == nil {
 			warnings = append(warnings, fmt.Sprintf("no workflow job provides check %q; not requiring it", check))
+			missing = append(missing, check)
 			continue
 		}
 		checks = append(checks, check)
@@ -191,6 +192,9 @@ func decideChecks(rs *config.Ruleset, wfs workflows.Set, public bool) (checks []
 	case !public:
 		warnings = append(warnings, "not public: no merge queue (private repositories need GitHub Enterprise "+
 			"for it); requiring up-to-date branches instead")
+	case len(missing) > 0:
+		warnings = append(warnings, fmt.Sprintf("checks %s not provided: no merge queue yet; requiring "+
+			"up-to-date branches instead", quoteList(missing)))
 	case len(noMergeGroup) > 0:
 		warnings = append(warnings, fmt.Sprintf("no merge_group trigger in %s: no merge queue yet; requiring "+
 			"up-to-date branches instead", quoteList(noMergeGroup)))

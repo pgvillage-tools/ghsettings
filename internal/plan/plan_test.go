@@ -196,7 +196,11 @@ var _ = Describe("Planner", func() {
 	It("doesn't require checks that no workflow provides", func() {
 		delete(api.workflows["good"], "ci.yml")
 		r := planOrg().Repos[0]
-		Expect(r.Warnings).To(ConsistOf(ContainSubstring(`check "CI result"`)))
+		Expect(r.Ruleset.MergeQueue).To(BeFalse())
+		Expect(r.Warnings).To(ConsistOf(
+			ContainSubstring(`no workflow job provides check "CI result"`),
+			ContainSubstring(`checks "CI result" not provided: no merge queue yet`),
+		))
 		Expect(changePaths(r.Ruleset.Changes)).To(ContainElement(
 			`~ rules.required_status_checks.required_status_checks: ["CI result (15368)","Validate PR Title (15368)"]` +
 				` -> ["Validate PR Title (15368)"]`))
