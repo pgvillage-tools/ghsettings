@@ -20,6 +20,16 @@ ghsettings plan -c config/ -o pgvillage-tools -r 'pg*'
 `plan` shows what would change and changes nothing. With `--detailed-exitcode` it exits with 2 when there are
 changes (for drift detection).
 
+`export` writes the current state of an org as config, to start managing repositories without changing them:
+
+```shell
+ghsettings export -o pgvillage-tools -f config/pgvillage-tools.yaml
+```
+
+Repositories with the same state share a profile (named after their common prefix, e.g. `ansible-role`). The export
+is checked by planning it: repositories whose plan is not empty are reported, e.g. because a required check has no
+workflow job, so `plan` would drop it.
+
 The token needs read access to the administration (settings, rulesets) and contents (workflows) of the repositories,
 e.g. a GitHub App installation token with `Administration: read` and `Contents: read`.
 
