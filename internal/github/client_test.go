@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 
@@ -118,5 +119,56 @@ var _ = Describe("Client", func() {
 	It("fails on invalid JSON", func() {
 		_, err := client.GetRepo(ctx, "o", "garbage")
 		Expect(err).To(MatchError(ContainSubstring("decoding response")))
+	})
+})
+
+var _ = Describe("Client writes", func() {
+	var (
+		server *httptest.Server
+		client *github.Client
+		got    []string
+		ctx    = context.Background()
+	)
+
+	BeforeEach(func() {
+		got = nil
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			got = append(got, fmt.Sprintf("%s %s %s %s", r.Method, r.URL.Path, r.Header.Get("Content-Type"), body))
+			switch {
+			case r.URL.Path == "/repos/o/denied":
+				http.Error(w, `{"message":"Resource not accessible"}`, http.StatusForbidden)
+			case r.Method == http.MethodPost:
+				fmt.Fprint(w, `{"id":7,"name":"main"}`)
+			default:
+				fmt.Fprint(w, `{}`)
+			}
+		}))
+		client = github.NewClient("secret")
+		client.BaseURL = server.URL
+	})
+
+	AfterEach(func() { server.Close() })
+
+	It("patches a repository", func() {
+		Expect(client.UpdateRepo(ctx, "o", "a", map[string]any{"allow_auto_merge": true})).To(Succeed())
+		Expect(got).To(Equal([]string{`PATCH /repos/o/a application/json {"allow_auto_merge":true}`}))
+	})
+
+	It("creates a ruleset", func() {
+		id, err := client.CreateRuleset(ctx, "o", "a", map[string]any{"name": "main"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(id).To(BeEquivalentTo(7))
+		Expect(got).To(Equal([]string{`POST /repos/o/a/rulesets application/json {"name":"main"}`}))
+	})
+
+	It("updates a ruleset", func() {
+		Expect(client.UpdateRuleset(ctx, "o", "a", 7, map[string]any{"name": "main"})).To(Succeed())
+		Expect(got).To(Equal([]string{`PUT /repos/o/a/rulesets/7 application/json {"name":"main"}`}))
+	})
+
+	It("returns errors", func() {
+		Expect(client.UpdateRepo(ctx, "o", "denied", map[string]any{})).To(MatchError(ContainSubstring("403")))
+		Expect(client.UpdateRepo(ctx, "o", "a", map[string]any{"bad": make(chan int)})).To(HaveOccurred())
 	})
 })
