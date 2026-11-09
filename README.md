@@ -20,6 +20,12 @@ ghsettings plan -c config/ -o pgvillage-tools -r 'pg*'
 `plan` shows what would change and changes nothing. With `--detailed-exitcode` it exits with 2 when there are
 changes (for drift detection).
 
+`apply` plans, shows the plan, and makes exactly those changes: repository settings with one `PATCH` of the changed
+fields, and the ruleset with a `POST` (new) or `PUT` (existing). Repositories without changes are not touched. A
+`PUT` keeps what the config doesn't manage: bypass actors, and rule parameters that the config doesn't set. Rules
+that the config doesn't have are removed. `apply` needs a token with write access to the administration of the
+repositories.
+
 `export` writes the current state of an org as config, to start managing repositories without changing them:
 
 ```shell

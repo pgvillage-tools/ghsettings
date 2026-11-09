@@ -21,7 +21,7 @@ func newRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().StringP("config", "c", envOr("GHSETTINGS_CONFIG", "config"),
 		"config file, or directory with *.yaml files (env GHSETTINGS_CONFIG)")
-	root.AddCommand(newPlanCmd(), newExportCmd())
+	root.AddCommand(newPlanCmd(), newApplyCmd(), newExportCmd())
 	return root
 }
 

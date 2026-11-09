@@ -6,6 +6,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -201,4 +202,34 @@ func (c *Client) ListWorkflows(ctx context.Context, owner, repo string) (map[str
 		files[e.Path] = data
 	}
 	return files, nil
+}
+
+// send encodes body as JSON and sends it.
+func (c *Client) send(ctx context.Context, method, path string, body, out any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	_, err = c.do(ctx, method, path, bytes.NewReader(data), out)
+	return err
+}
+
+// UpdateRepo changes fields of a repository (PATCH /repos/{owner}/{repo}).
+func (c *Client) UpdateRepo(ctx context.Context, owner, repo string, fields map[string]any) error {
+	return c.send(ctx, http.MethodPatch, fmt.Sprintf("repos/%s/%s", url.PathEscape(owner), url.PathEscape(repo)),
+		fields, nil)
+}
+
+// CreateRuleset creates a ruleset on a repository and returns its id.
+func (c *Client) CreateRuleset(ctx context.Context, owner, repo string, ruleset any) (int64, error) {
+	var out RulesetSummary
+	err := c.send(ctx, http.MethodPost,
+		fmt.Sprintf("repos/%s/%s/rulesets", url.PathEscape(owner), url.PathEscape(repo)), ruleset, &out)
+	return out.ID, err
+}
+
+// UpdateRuleset replaces a ruleset of a repository. Fields that are left out of ruleset (like bypass_actors) are kept.
+func (c *Client) UpdateRuleset(ctx context.Context, owner, repo string, id int64, ruleset any) error {
+	return c.send(ctx, http.MethodPut,
+		fmt.Sprintf("repos/%s/%s/rulesets/%d", url.PathEscape(owner), url.PathEscape(repo), id), ruleset, nil)
 }

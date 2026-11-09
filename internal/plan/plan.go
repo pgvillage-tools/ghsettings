@@ -30,7 +30,9 @@ type RulesetPlan struct {
 	// ID of the existing ruleset; 0 when it must be created.
 	ID int64
 	// Body is the desired ruleset, as it would be sent to the API.
-	Body       *Ruleset
+	Body *Ruleset
+	// Current is the ruleset on GitHub; nil when it must be created.
+	Current    *Ruleset
 	MergeQueue bool
 	Changes    []Change
 }
@@ -149,6 +151,7 @@ func (p *Planner) planRepo(ctx context.Context, org string, r github.RepoSummary
 			return nil, fmt.Errorf("%s/%s: ruleset %q: %w", org, r.Name, desired.Ruleset.Name, decodeErr)
 		}
 		rsPlan.ID = current.ID
+		rsPlan.Current = current
 		currentView = rulesetView(current, managed)
 	}
 	rsPlan.Changes = diffMaps(currentView, rulesetView(body, managed))
