@@ -6,6 +6,7 @@ package github_test
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,7 +37,33 @@ var _ = Describe("Client", func() {
 			fmt.Fprint(w, `[{"name":"a","visibility":"public"}]`)
 		})
 		mux.HandleFunc("/repos/o/a", func(w http.ResponseWriter, _ *http.Request) {
-			fmt.Fprint(w, `{"name":"a","allow_auto_merge":true}`)
+			fmt.Fprint(w, `{"name":"a","allow_auto_merge":true,"allow_forking":true,"allow_merge_commit":true,
+				"allow_rebase_merge":true,"allow_squash_merge":true,"allow_update_branch":false,
+				"delete_branch_on_merge":true,"merge_commit_message":"PR_TITLE","merge_commit_title":"MERGE_MESSAGE",
+				"squash_merge_commit_message":"COMMIT_MESSAGES","squash_merge_commit_title":"COMMIT_OR_PR_TITLE",
+				"web_commit_signoff_required":false}`)
+		})
+		// Without push access, the REST API leaves out the merge settings
+		mux.HandleFunc("/repos/o/readonly", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, `{"name":"readonly","allow_forking":true}`)
+		})
+		mux.HandleFunc("/repos/o/gqlerror", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, `{"name":"gqlerror"}`)
+		})
+		mux.HandleFunc("/graphql", func(w http.ResponseWriter, r *http.Request) {
+			Expect(r.Method).To(Equal(http.MethodPost))
+			var req struct {
+				Query     string            `json:"query"`
+				Variables map[string]string `json:"variables"`
+			}
+			Expect(json.NewDecoder(r.Body).Decode(&req)).To(Succeed())
+			if req.Variables["name"] == "gqlerror" {
+				fmt.Fprint(w, `{"errors":[{"message":"Something went wrong"}]}`)
+				return
+			}
+			Expect(req.Query).To(ContainSubstring("squashMergeAllowed"))
+			Expect(req.Query).NotTo(ContainSubstring("forkingAllowed"))
+			fmt.Fprint(w, `{"data":{"repository":{"squashMergeAllowed":true,"autoMergeAllowed":false}}}`)
 		})
 		mux.HandleFunc("/repos/o/a/rulesets", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, `[{"id":1,"name":"main","source_type":"Organization"},
@@ -102,6 +129,19 @@ var _ = Describe("Client", func() {
 		files, err := client.ListWorkflows(ctx, "o", "none")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(files).To(BeEmpty())
+	})
+
+	It("reads settings that REST leaves out with GraphQL", func() {
+		repo, err := client.GetRepo(ctx, "o", "readonly")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(repo).To(HaveKeyWithValue("allow_squash_merge", true))
+		Expect(repo).To(HaveKeyWithValue("allow_auto_merge", false))
+		Expect(repo).To(HaveKeyWithValue("allow_forking", true))
+	})
+
+	It("returns GraphQL errors", func() {
+		_, err := client.GetRepo(ctx, "o", "gqlerror")
+		Expect(err).To(MatchError(ContainSubstring("graphql: Something went wrong")))
 	})
 
 	It("returns ErrNotFound on 404", func() {

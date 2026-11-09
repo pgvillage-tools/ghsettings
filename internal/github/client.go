@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -130,11 +131,64 @@ func (c *Client) ListRepos(ctx context.Context, org string) ([]RepoSummary, erro
 	return getAll[RepoSummary](ctx, c, fmt.Sprintf("orgs/%s/repos?type=all", url.PathEscape(org)))
 }
 
-// GetRepo returns all fields of a repository.
+// graphQLSettings maps repository settings of the REST API to the same fields in GraphQL. The REST API only returns
+// these settings to tokens with push access; GraphQL also returns them with read access (e.g. a read-only GitHub
+// App).
+var graphQLSettings = map[string]string{
+	"allow_auto_merge":            "autoMergeAllowed",
+	"allow_forking":               "forkingAllowed",
+	"allow_merge_commit":          "mergeCommitAllowed",
+	"allow_rebase_merge":          "rebaseMergeAllowed",
+	"allow_squash_merge":          "squashMergeAllowed",
+	"allow_update_branch":         "allowUpdateBranch",
+	"delete_branch_on_merge":      "deleteBranchOnMerge",
+	"merge_commit_message":        "mergeCommitMessage",
+	"merge_commit_title":          "mergeCommitTitle",
+	"squash_merge_commit_message": "squashMergeCommitMessage",
+	"squash_merge_commit_title":   "squashMergeCommitTitle",
+	"web_commit_signoff_required": "webCommitSignoffRequired",
+}
+
+// GetRepo returns all fields of a repository. Settings that the REST API leaves out (without push access) are read
+// with GraphQL.
 func (c *Client) GetRepo(ctx context.Context, owner, repo string) (map[string]any, error) {
 	var out map[string]any
-	err := c.get(ctx, fmt.Sprintf("repos/%s/%s", url.PathEscape(owner), url.PathEscape(repo)), &out)
-	return out, err
+	if err := c.get(ctx, fmt.Sprintf("repos/%s/%s", url.PathEscape(owner), url.PathEscape(repo)), &out); err != nil {
+		return nil, err
+	}
+	var missing []string
+	for rest, gql := range graphQLSettings {
+		if out[rest] == nil {
+			missing = append(missing, gql)
+		}
+	}
+	if len(missing) == 0 {
+		return out, nil
+	}
+	sort.Strings(missing)
+	query := fmt.Sprintf(`query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { %s } }`,
+		strings.Join(missing, " "))
+	var resp struct {
+		Data struct {
+			Repository map[string]any `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	body := map[string]any{"query": query, "variables": map[string]any{"owner": owner, "name": repo}}
+	if err := c.send(ctx, http.MethodPost, "graphql", body, &resp); err != nil {
+		return nil, err
+	}
+	if len(resp.Errors) > 0 {
+		return nil, fmt.Errorf("%s/%s: graphql: %s", owner, repo, resp.Errors[0].Message)
+	}
+	for rest, gql := range graphQLSettings {
+		if v, ok := resp.Data.Repository[gql]; ok && out[rest] == nil {
+			out[rest] = v
+		}
+	}
+	return out, nil
 }
 
 // RulesetSummary is a ruleset in the list of a repository.
