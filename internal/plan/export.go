@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path"
 	"reflect"
 	"sort"
@@ -71,6 +72,10 @@ func (e *Exporter) Export(ctx context.Context, org string) (*config.Config, []st
 		}
 		warnings = append(warnings, repoWarnings...)
 		names = append(names, r.Name)
+		layer.Settings = wholeNumbersMap(layer.Settings)
+		if layer.Ruleset != nil {
+			layer.Ruleset = wholeNumbersMap(layer.Ruleset)
+		}
 		layers[r.Name] = layer
 	}
 	cfg := &config.Config{Profiles: map[string]config.Layer{}, Orgs: map[string]config.Org{}}
@@ -238,7 +243,36 @@ func isEmpty(v any) bool {
 	return false
 }
 
-// group gives repositories with the same state a shared profile, and returns the repo rules.
+// wholeNumbers turns float64 values without a fraction into int64, so the config says 1 instead of 1.0.
+func wholeNumbers(v any) any {
+	switch t := v.(type) {
+	case float64:
+		if t == math.Trunc(t) {
+			return int64(t)
+		}
+	case map[string]any:
+		return wholeNumbersMap(t)
+	case []any:
+		out := make([]any, len(t))
+		for i, child := range t {
+			out[i] = wholeNumbers(child)
+		}
+		return out
+	}
+	return v
+}
+
+func wholeNumbersMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, child := range m {
+		out[k] = wholeNumbers(child)
+	}
+	return out
+}
+
+// group gives repositories with the same state a shared profile, and returns the repo rules. A group whose
+// repositories share a prefix gets one glob rule, when every other repository that the glob matches gets an exact
+// rule; the exact rules come first, so they win.
 func group(names []string, layers map[string]config.Layer, profiles map[string]config.Layer) []config.RepoRule {
 	byKey := map[string][]string{}
 	var keys []string
@@ -250,32 +284,66 @@ func group(names []string, layers map[string]config.Layer, profiles map[string]c
 		}
 		byKey[k] = append(byKey[k], n)
 	}
-	var rules []config.RepoRule
-	for i, k := range keys {
+	// Choose the globs: a group with a common prefix, whose glob matches no repository of another glob group
+	globs := map[string]string{} // key -> glob
+	globOf := map[string]string{}
+	for _, k := range keys {
+		if members := byKey[k]; len(members) > 1 {
+			if prefix := commonPrefix(members); len(prefix) >= minPrefixLen {
+				globs[k] = prefix + "*"
+				for _, m := range members {
+					globOf[m] = globs[k]
+				}
+			}
+		}
+	}
+	for k, glob := range globs {
+		for _, n := range names {
+			if matched, _ := path.Match(glob, n); matched && globOf[n] != "" && globOf[n] != glob {
+				delete(globs, k)
+				break
+			}
+		}
+	}
+	var exact, globRules []config.RepoRule
+	for _, k := range keys {
 		members := byKey[k]
 		if len(members) == 1 {
-			rules = append(rules, config.RepoRule{Match: members[0], Layer: layers[members[0]]})
+			exact = append(exact, config.RepoRule{Match: members[0], Layer: layers[members[0]]})
 			continue
 		}
-		prefix := commonPrefix(members)
-		profile := strings.TrimRight(prefix, "-_")
-		if len(profile) < minPrefixLen {
-			profile = fmt.Sprintf("group-%d", i+1)
-		}
-		if _, taken := profiles[profile]; taken {
-			profile = fmt.Sprintf("%s-%d", profile, i+1)
-		}
+		profile := profileName(members, profiles)
 		profiles[profile] = layers[members[0]]
-		if len(prefix) >= minPrefixLen && matchesExactly(prefix+"*", members, names) {
-			rules = append(rules, config.RepoRule{Match: prefix + "*", Profile: profile})
+		if glob, ok := globs[k]; ok {
+			globRules = append(globRules, config.RepoRule{Match: glob, Profile: profile})
 			continue
 		}
 		for _, m := range members {
-			rules = append(rules, config.RepoRule{Match: m, Profile: profile})
+			exact = append(exact, config.RepoRule{Match: m, Profile: profile})
 		}
 	}
-	sort.SliceStable(rules, func(i, j int) bool { return rules[i].Match < rules[j].Match })
-	return rules
+	sort.Slice(exact, func(i, j int) bool { return exact[i].Match < exact[j].Match })
+	sort.Slice(globRules, func(i, j int) bool { return globRules[i].Match < globRules[j].Match })
+	return append(exact, globRules...)
+}
+
+// profileName names a profile after the common prefix of its repositories, or group-<n>.
+func profileName(members []string, profiles map[string]config.Layer) string {
+	name := strings.TrimRight(commonPrefix(members), "-_")
+	if len(name) >= minPrefixLen {
+		if _, taken := profiles[name]; !taken {
+			return name
+		}
+	}
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("group-%d", i)
+		if name != "" && len(name) >= minPrefixLen {
+			candidate = fmt.Sprintf("%s-%d", name, i)
+		}
+		if _, taken := profiles[candidate]; !taken {
+			return candidate
+		}
+	}
 }
 
 // commonPrefix returns the longest common prefix of names, cut after the last - or _.
@@ -290,15 +358,4 @@ func commonPrefix(names []string) string {
 		return prefix[:i+1]
 	}
 	return ""
-}
-
-// matchesExactly reports whether glob matches exactly the members among all names.
-func matchesExactly(glob string, members, all []string) bool {
-	count := 0
-	for _, n := range all {
-		if matched, _ := path.Match(glob, n); matched {
-			count++
-		}
-	}
-	return count == len(members)
 }

@@ -140,11 +140,42 @@ var _ = Describe("Exporter", func() {
 		for name := range cfg.Profiles {
 			profile = name
 		}
-		Expect(profile).To(HavePrefix("group-"))
+		Expect(profile).To(Equal("group-1"))
 		Expect(cfg.Orgs["o"].Repos).To(ContainElements(
 			config.RepoRule{Match: "other", Profile: profile},
 			config.RepoRule{Match: "role-a", Profile: profile},
 		))
+	})
+
+	It("uses a glob with exceptions first, and whole numbers", func() {
+		api.repos = append(api.repos, github.RepoSummary{Name: "role-c", Visibility: "public"},
+			github.RepoSummary{Name: "role-d", Visibility: "public"})
+		api.settings["role-c"] = settings(false)
+		api.settings["role-d"] = settings(false)
+		api.rulesets["role-c"] = strictRuleset(3, "Ansible Lint")
+		api.rulesets["role-d"] = strictRuleset(4, "Ansible Lint")
+		api.workflows["role-c"] = map[string][]byte{"lint.yml": []byte(lintWorkflow)}
+		api.workflows["role-d"] = map[string][]byte{"lint.yml": []byte(lintWorkflow)}
+		api.settings["role-a"]["allow_auto_merge"] = false // role-a now matches role-c and role-d
+		cfg, _ := export()
+		rules := cfg.Orgs["o"].Repos
+		Expect(rules[len(rules)-1]).To(Equal(config.RepoRule{Match: "role-*", Profile: "role"}))
+		Expect(rules).To(ContainElement(HaveField("Match", "role-b")))
+		pr := cfg.Profiles["role"].Ruleset["rules"].(map[string]any)["pull_request"].(map[string]any)
+		Expect(pr["required_approving_review_count"]).To(Equal(int64(1)))
+
+		data, err := yaml.Marshal(cfg)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(data)).NotTo(ContainSubstring(".0"))
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "o.yaml"), data, 0o600)).To(Succeed())
+		loaded, err := config.Load(dir)
+		Expect(err).NotTo(HaveOccurred())
+		p, err := (&plan.Planner{Config: loaded, API: api}).PlanOrg(context.Background(), "o")
+		Expect(err).NotTo(HaveOccurred())
+		for _, r := range p.Repos {
+			Expect(r.HasChanges()).To(BeFalse(), r.Repo)
+		}
 	})
 
 	It("warns about state that the config can't express", func() {
