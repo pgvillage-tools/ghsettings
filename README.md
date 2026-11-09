@@ -112,6 +112,9 @@ make test         # unit tests with coverage
 make lint         # golangci-lint
 ```
 
+`make lint` installs the same pinned golangci-lint version as CI into `bin/` on first use, using your Go
+toolchain (Go 1.26 or newer). It uses that binary instead of any system-installed golangci-lint.
+
 ## License
 
 [GNU General Public License v3.0](LICENSE)

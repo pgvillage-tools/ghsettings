@@ -2,6 +2,10 @@ REPO_PATH=github.com/pgvillage-tools/ghsettings
 VERSION ?= $(shell scripts/git-version.sh)
 LD_FLAGS="-w -X main.version=$(VERSION)"
 
+# Keep this version in sync with .github/workflows/ci-run-on-pr.yaml.
+GOLANGCI_LINT_VERSION := v2.15.0
+GOLANGCI_LINT := $(CURDIR)/bin/golangci-lint/$(GOLANGCI_LINT_VERSION)/golangci-lint
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -21,8 +25,11 @@ test:
 	go test ./... -coverprofile cover.out -coverpkg=./internal/...
 
 .PHONY: lint
-lint:
-	golangci-lint run ./...
+lint: $(GOLANGCI_LINT)
+	"$(GOLANGCI_LINT)" run ./...
+
+$(GOLANGCI_LINT):
+	GOBIN="$(dir $(GOLANGCI_LINT))" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: install-go-test-coverage
 install-go-test-coverage:
