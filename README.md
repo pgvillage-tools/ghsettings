@@ -32,8 +32,9 @@ repositories.
 ghsettings export -o pgvillage-tools -f config/pgvillage-tools.yaml
 ```
 
-Repositories with the same state share a profile (named after their common prefix, e.g. `ansible-role`). The export
-is checked by planning it: repositories whose plan is not empty are reported, e.g. because a required check has no
+Repositories with the same state share a profile, named after the org and their common prefix (e.g.
+`pgvillage-ansible-role`). Profiles are shared by all config files, so with the org in the name the exports of several
+orgs don't collide; rename them as you like. The export is checked by planning it: repositories whose plan is not empty are reported, e.g. because a required check has no
 workflow job, so `plan` would drop it.
 
 The token needs read access to the administration (settings, rulesets) and contents (workflows) of the repositories,

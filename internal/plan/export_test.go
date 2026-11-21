@@ -108,17 +108,17 @@ var _ = Describe("Exporter", func() {
 
 	It("groups repositories with the same state in a profile", func() {
 		cfg, _ := export()
-		Expect(cfg.Profiles).To(HaveKey("role"))
+		Expect(cfg.Profiles).To(HaveKey("o-role"))
 		Expect(cfg.Orgs["o"].Repos).To(ConsistOf(
 			config.RepoRule{Match: "bare", Layer: config.Layer{Settings: settings(false)}},
 			HaveField("Match", "queued"),
-			config.RepoRule{Match: "role-*", Profile: "role"},
+			config.RepoRule{Match: "role-*", Profile: "o-role"},
 		))
 	})
 
 	It("leaves out defaults and empty parameters", func() {
 		cfg, _ := export()
-		rs := cfg.Profiles["role"].Ruleset
+		rs := cfg.Profiles["o-role"].Ruleset
 		Expect(rs).NotTo(HaveKey("name"))
 		Expect(rs).NotTo(HaveKey("conditions"))
 		Expect(rs).NotTo(HaveKey("merge_queue"))
@@ -140,7 +140,7 @@ var _ = Describe("Exporter", func() {
 		for name := range cfg.Profiles {
 			profile = name
 		}
-		Expect(profile).To(Equal("group-1"))
+		Expect(profile).To(Equal("o-group-1"))
 		Expect(cfg.Orgs["o"].Repos).To(ContainElements(
 			config.RepoRule{Match: "other", Profile: profile},
 			config.RepoRule{Match: "role-a", Profile: profile},
@@ -159,9 +159,9 @@ var _ = Describe("Exporter", func() {
 		api.settings["role-a"]["allow_auto_merge"] = false // role-a now matches role-c and role-d
 		cfg, _ := export()
 		rules := cfg.Orgs["o"].Repos
-		Expect(rules[len(rules)-1]).To(Equal(config.RepoRule{Match: "role-*", Profile: "role"}))
+		Expect(rules[len(rules)-1]).To(Equal(config.RepoRule{Match: "role-*", Profile: "o-role"}))
 		Expect(rules).To(ContainElement(HaveField("Match", "role-b")))
-		pr := cfg.Profiles["role"].Ruleset["rules"].(map[string]any)["pull_request"].(map[string]any)
+		pr := cfg.Profiles["o-role"].Ruleset["rules"].(map[string]any)["pull_request"].(map[string]any)
 		Expect(pr["required_approving_review_count"]).To(Equal(int64(1)))
 
 		data, err := yaml.Marshal(cfg)
