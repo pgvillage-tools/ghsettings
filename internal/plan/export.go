@@ -41,7 +41,9 @@ type Exporter struct {
 }
 
 // Export returns the current state of the repositories of an org as config. Repositories with the same state share a
-// profile. Archived repositories are left out. The warnings name state that the config can't express exactly.
+// profile, named after the org and their common prefix (e.g. myorg-ansible-role), so that the exports of several
+// orgs can be used side by side. Archived repositories are left out. The warnings name state that the config can't
+// express exactly.
 func (e *Exporter) Export(ctx context.Context, org string) (*config.Config, []string, error) {
 	keys := e.Settings
 	if len(keys) == 0 {
@@ -79,7 +81,7 @@ func (e *Exporter) Export(ctx context.Context, org string) (*config.Config, []st
 		layers[r.Name] = layer
 	}
 	cfg := &config.Config{Profiles: map[string]config.Layer{}, Orgs: map[string]config.Org{}}
-	cfg.Orgs[org] = config.Org{Repos: group(names, layers, cfg.Profiles)}
+	cfg.Orgs[org] = config.Org{Repos: group(org, names, layers, cfg.Profiles)}
 	return cfg, warnings, nil
 }
 
@@ -273,7 +275,8 @@ func wholeNumbersMap(m map[string]any) map[string]any {
 // group gives repositories with the same state a shared profile, and returns the repo rules. A group whose
 // repositories share a prefix gets one glob rule, when every other repository that the glob matches gets an exact
 // rule; the exact rules come first, so they win.
-func group(names []string, layers map[string]config.Layer, profiles map[string]config.Layer) []config.RepoRule {
+func group(org string, names []string, layers map[string]config.Layer,
+	profiles map[string]config.Layer) []config.RepoRule {
 	byKey := map[string][]string{}
 	var keys []string
 	for _, n := range names {
@@ -312,7 +315,7 @@ func group(names []string, layers map[string]config.Layer, profiles map[string]c
 			exact = append(exact, config.RepoRule{Match: members[0], Layer: layers[members[0]]})
 			continue
 		}
-		profile := profileName(members, profiles)
+		profile := profileName(org, members, profiles)
 		profiles[profile] = layers[members[0]]
 		if glob, ok := globs[k]; ok {
 			globRules = append(globRules, config.RepoRule{Match: glob, Profile: profile})
@@ -327,18 +330,19 @@ func group(names []string, layers map[string]config.Layer, profiles map[string]c
 	return append(exact, globRules...)
 }
 
-// profileName names a profile after the common prefix of its repositories, or group-<n>.
-func profileName(members []string, profiles map[string]config.Layer) string {
+// profileName names a profile after the org and the common prefix of its repositories (<org>-<prefix>), or
+// <org>-group-<n>. Profiles are shared by all config files, so the org keeps the exports of several orgs apart.
+func profileName(org string, members []string, profiles map[string]config.Layer) string {
 	name := strings.TrimRight(commonPrefix(members), "-_")
 	if len(name) >= minPrefixLen {
-		if _, taken := profiles[name]; !taken {
-			return name
+		if _, taken := profiles[org+"-"+name]; !taken {
+			return org + "-" + name
 		}
 	}
 	for i := 1; ; i++ {
-		candidate := fmt.Sprintf("group-%d", i)
-		if name != "" && len(name) >= minPrefixLen {
-			candidate = fmt.Sprintf("%s-%d", name, i)
+		candidate := fmt.Sprintf("%s-group-%d", org, i)
+		if len(name) >= minPrefixLen {
+			candidate = fmt.Sprintf("%s-%s-%d", org, name, i)
 		}
 		if _, taken := profiles[candidate]; !taken {
 			return candidate
